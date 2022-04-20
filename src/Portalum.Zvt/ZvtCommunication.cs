@@ -1,6 +1,8 @@
 ﻿using Microsoft.Extensions.Logging;
+using Portalum.Zvt.Helpers;
 using Portalum.Zvt.Models;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -24,6 +26,8 @@ namespace Portalum.Zvt
         /// New data received from the pt device
         /// </summary>
         public event Func<byte[], bool> DataReceived;
+
+        public event Func<CompletionInfo> GetCompletionInfo;
 
         private readonly byte[] _positiveCompletionData1 = new byte[] { 0x80, 0x00, 0x00 }; //Default
         private readonly byte[] _positiveCompletionData2 = new byte[] { 0x84, 0x00, 0x00 }; //Alternative
@@ -90,8 +94,42 @@ namespace Portalum.Zvt
             var dataProcessed = this.DataReceived?.Invoke(data);
             if (dataProcessed.HasValue && dataProcessed.Value)
             {
-                //Send acknowledge before process the data
-                this._deviceCommunication.SendAsync(this._positiveCompletionData1);
+                var completionInfo = this.GetCompletionInfo?.Invoke();
+                if (completionInfo == null)
+                {
+                    //Default if no one has subscribed to the event
+                    this._deviceCommunication.SendAsync(this._positiveCompletionData1);
+                    return;
+                }
+
+                switch (completionInfo.Status)
+                {
+                    case CompletionInfoStatus.Wait:
+                        //Send the Status-Information again after a wait-time of 2 seconds because the ECR has not yet completed the issue of goods.
+                        this._deviceCommunication.SendAsync(this._positiveCompletionData3);
+                        break;
+                    case CompletionInfoStatus.ChangeAmount:
+                        var controlField = new byte[] { 0x84, 0x9D };
+
+                        // Change the amount from the original in the start request
+                        var package = new List<byte>();
+                        package.Add(0x04); //Amount prefix
+                        package.AddRange(NumberHelper.DecimalToBcd(completionInfo.Amount));
+                        this._deviceCommunication.SendAsync(PackageHelper.Create(controlField, package.ToArray()));
+                        break;
+                    case CompletionInfoStatus.Successful:
+                        this._deviceCommunication.SendAsync(this._positiveCompletionData1);
+                        break;
+                    case CompletionInfoStatus.Failure:
+                        var controlField1 = new byte[] { 0x84, 0x01 };
+
+                        var package1 = new List<byte>();
+                        package1.Add(0x00);
+                        this._deviceCommunication.SendAsync(PackageHelper.Create(controlField1, package1.ToArray()));
+                        break;
+                    default:
+                        throw new NotImplementedException();
+                }
             }
         }
 
