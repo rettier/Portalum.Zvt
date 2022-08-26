@@ -344,14 +344,16 @@ namespace Portalum.Zvt
         private async Task<CommandResponse> SendCommandAsyncWithCallback(
             byte[] commandData,
             Func<Task<bool>> callback,
+            TimeSpan callbackTimeout,
             bool endAfterAcknowledge = false,
             CancellationToken cancellationToken = default
         )
         {
             using var timeoutCancellationTokenSource = new CancellationTokenSource(this._commandCompletionTimeout);
-            using var dataReceivcedCancellationTokenSource = new CancellationTokenSource();
+            using var callbackTimeoutCancellationTokenSource = new CancellationTokenSource(_commandCompletionTimeout);
+            using var dataReceivedCancellationTokenSource = new CancellationTokenSource();
             using var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken,
-                dataReceivcedCancellationTokenSource.Token, timeoutCancellationTokenSource.Token);
+                dataReceivedCancellationTokenSource.Token, timeoutCancellationTokenSource.Token);
 
             Task<bool> callbackTask = null;
 
@@ -364,7 +366,7 @@ namespace Portalum.Zvt
             {
                 commandResponse.State = CommandResponseState.Successful;
 
-                dataReceivcedCancellationTokenSource.Cancel();
+                dataReceivedCancellationTokenSource.Cancel();
             }
 
             void abortReceived(string errorMessage)
@@ -372,7 +374,7 @@ namespace Portalum.Zvt
                 commandResponse.State = CommandResponseState.Abort;
                 commandResponse.ErrorMessage = errorMessage;
 
-                dataReceivcedCancellationTokenSource.Cancel();
+                dataReceivedCancellationTokenSource.Cancel();
             }
 
             void intermediateStatusInformationReceived(string status)
@@ -387,10 +389,18 @@ namespace Portalum.Zvt
                     if (callbackTask == null)
                     {
                         this._zvtCommunication.suppressAcknowledge = true;
-                        callbackTask = Task.Run(callback, cancellationToken);
+                        callbackTimeoutCancellationTokenSource.CancelAfter(callbackTimeout);
+                        callbackTask = Task.Run(callback, callbackTimeoutCancellationTokenSource.Token);
                         callbackTask.ContinueWith(task =>
                         {
-                            this._zvtCommunication.SendAcknowledgement(task.Result);
+                            if (callbackTimeoutCancellationTokenSource.IsCancellationRequested)
+                            {
+                                this._zvtCommunication.SendAcknowledgement(false);
+                            }
+                            else
+                            {
+                                this._zvtCommunication.SendAcknowledgement(task.Result);
+                            }
                             this._zvtCommunication.suppressAcknowledge = false;
                         });
                     }
@@ -566,6 +576,10 @@ namespace Portalum.Zvt
                 package.Add(0x01); //timeout prefix
                 package.AddRange(NumberHelper.DecimalToBcd((decimal)issueGoodsTimeout / 100, length: 1));
             }
+            else
+            {
+                issueGoodsTimeout = 30;
+            }
 
             var fullPackage = this.CreatePackage(new byte[] { 0x06, 0x01 }, package);
 
@@ -573,7 +587,8 @@ namespace Portalum.Zvt
             {
                 return await this.SendCommandAsyncWithCallback(fullPackage,
                     cancellationToken: cancellationToken,
-                    callback: issueGoodsCallback
+                    callback: issueGoodsCallback,
+                    callbackTimeout: TimeSpan.FromSeconds((double)issueGoodsTimeout)
                 );
             }
             else
