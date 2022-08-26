@@ -19,6 +19,7 @@ namespace Portalum.Zvt
         private CancellationTokenSource _acknowledgeReceivedCancellationTokenSource;
         private byte[] _dataBuffer;
         private bool _waitForAcknowledge = false;
+        public bool suppressAcknowledge = false;
 
         /// <summary>
         /// New data received from the pt device
@@ -27,7 +28,10 @@ namespace Portalum.Zvt
 
         private readonly byte[] _positiveCompletionData1 = new byte[] { 0x80, 0x00, 0x00 }; //Default
         private readonly byte[] _positiveCompletionData2 = new byte[] { 0x84, 0x00, 0x00 }; //Alternative
-        private readonly byte[] _positiveCompletionData3 = new byte[] { 0x84, 0x9C, 0x00 }; //Special case for request more time
+
+        private readonly byte[]
+            _positiveCompletionData3 = new byte[] { 0x84, 0x9C, 0x00 }; //Special case for request more time
+
         private readonly byte[] _otherCommandData = new byte[] { 0x84, 0x83, 0x00 };
         private readonly byte _negativeCompletionPrefix = 0x84;
 
@@ -85,13 +89,18 @@ namespace Portalum.Zvt
             this._acknowledgeReceivedCancellationTokenSource?.Cancel();
         }
 
+        public void SendCompletion()
+        {
+            this._deviceCommunication.SendAsync(this._positiveCompletionData1);
+        }
+        
         private void ProcessData(byte[] data)
         {
             var dataProcessed = this.DataReceived?.Invoke(data);
-            if (dataProcessed.HasValue && dataProcessed.Value)
+            if (dataProcessed.HasValue && dataProcessed.Value && !this.suppressAcknowledge)
             {
                 //Send acknowledge before process the data
-                this._deviceCommunication.SendAsync(this._positiveCompletionData1);
+                this.SendCompletion();
             }
         }
 
@@ -102,7 +111,7 @@ namespace Portalum.Zvt
         /// <param name="acknowledgeReceiveTimeoutMilliseconds">Maximum waiting time for the acknowledge package, default is 5 seconds, T3 Timeout</param>
         /// <param name="cancellationToken"></param>
         /// <returns></returns>
-        public async Task<SendCommandResult>  SendCommandAsync(
+        public async Task<SendCommandResult> SendCommandAsync(
             byte[] commandData,
             int acknowledgeReceiveTimeoutMilliseconds = 5000,
             CancellationToken cancellationToken = default)
@@ -112,12 +121,14 @@ namespace Portalum.Zvt
             this._acknowledgeReceivedCancellationTokenSource?.Dispose();
             this._acknowledgeReceivedCancellationTokenSource = new CancellationTokenSource();
 
-            using var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, this._acknowledgeReceivedCancellationTokenSource.Token);
+            using var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken,
+                this._acknowledgeReceivedCancellationTokenSource.Token);
 
             this._waitForAcknowledge = true;
             try
             {
-                await this._deviceCommunication.SendAsync(commandData, linkedCancellationTokenSource.Token).ContinueWith(task => { });
+                await this._deviceCommunication.SendAsync(commandData, linkedCancellationTokenSource.Token)
+                    .ContinueWith(task => { });
             }
             catch (Exception exception)
             {
@@ -126,15 +137,16 @@ namespace Portalum.Zvt
                 return SendCommandResult.SendFailure;
             }
 
-            await Task.Delay(acknowledgeReceiveTimeoutMilliseconds, linkedCancellationTokenSource.Token).ContinueWith(task =>
-            {
-                if (task.Status == TaskStatus.RanToCompletion)
+            await Task.Delay(acknowledgeReceiveTimeoutMilliseconds, linkedCancellationTokenSource.Token).ContinueWith(
+                task =>
                 {
-                    this._logger.LogError($"{nameof(SendCommandAsync)} - Wait task for acknowledge was aborted");
-                }
+                    if (task.Status == TaskStatus.RanToCompletion)
+                    {
+                        this._logger.LogError($"{nameof(SendCommandAsync)} - Wait task for acknowledge was aborted");
+                    }
 
-                this._waitForAcknowledge = false;
-            });
+                    this._waitForAcknowledge = false;
+                });
 
             this._acknowledgeReceivedCancellationTokenSource.Dispose();
 

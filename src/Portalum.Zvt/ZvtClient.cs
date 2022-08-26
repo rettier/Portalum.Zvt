@@ -337,12 +337,13 @@ namespace Portalum.Zvt
         /// SendCommandAsync
         /// </summary>
         /// <param name="commandData">The data of the command</param>
+        /// <param name="callback">A callback which is started after receiving a positive StatusInformation. The answer to StatusInformation is delayed until the end of the task or a timeout occurs.</param>
         /// <param name="endAfterAcknowledge">After receive an acknowledge the command is successful</param>
         /// <param name="cancellationToken"></param>
         /// <returns></returns>
         private async Task<CommandResponse> SendCommandAsyncWithCallback(
             byte[] commandData,
-            Task<bool> callback,
+            Func<Task<bool>> callback,
             bool endAfterAcknowledge = false,
             CancellationToken cancellationToken = default
         )
@@ -351,6 +352,8 @@ namespace Portalum.Zvt
             using var dataReceivcedCancellationTokenSource = new CancellationTokenSource();
             using var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken,
                 dataReceivcedCancellationTokenSource.Token, timeoutCancellationTokenSource.Token);
+
+            Task<bool> callbackTask = null;
 
             var commandResponse = new CommandResponse
             {
@@ -379,6 +382,25 @@ namespace Portalum.Zvt
 
             void statusInformationReceived(StatusInformation statusInformation)
             {
+                if (callback != null && statusInformation.ErrorCode == 0)
+                {
+                    if (callbackTask == null)
+                    {
+                        this._zvtCommunication.suppressAcknowledge = true;
+                        callbackTask = Task.Run(callback, cancellationToken);
+                        callbackTask.ContinueWith(task =>
+                        {
+                            this._zvtCommunication.SendCompletion();
+                            this._zvtCommunication.suppressAcknowledge = false;
+                        });
+                    }
+                    else
+                    {
+                        this._logger.LogWarning("An additional StatusInformation was received. " +
+                                                "The callback task is already running.");
+                    }
+                }
+
                 timeoutCancellationTokenSource.CancelAfter(this._commandCompletionTimeout);
             }
 
@@ -432,6 +454,7 @@ namespace Portalum.Zvt
                 this._receiveHandler.CompletionReceived -= completionReceived;
                 this._receiveHandler.IntermediateStatusInformationReceived -= intermediateStatusInformationReceived;
                 this._receiveHandler.StatusInformationReceived -= statusInformationReceived;
+                this._zvtCommunication.suppressAcknowledge = false;
             }
 
             return commandResponse;
@@ -523,14 +546,14 @@ namespace Portalum.Zvt
         /// </summary>
         /// <param name="amount">amount to be payed</param>
         /// <param name="cancellationToken"></param>
-        /// <param name="issueGoodsTask">A optional task which is started after the payment was successful. If the task returns true within maxStatusInfo * 2 seconds the payment is accepted. Otherwise the PT triggers an auto-reversal.</param>
-        /// <param name="maxStatusInfo">Defines the maximum number of times that ECR may request the result of the issue of goods from the PT via Status-Information. The default value is infinite. Status Information is sent periodically every 2 seconds.</param>
+        /// <param name="issueGoodsCallback">A optional task which is started after the payment was successful. If the task returns true within issueGoodsTimeout seconds the payment is accepted. Otherwise the PT triggers an auto-reversal.</param>
+        /// <param name="issueGoodsTimeout">Supplies the time in seconds that the PT waits during issue of goods for a response from the ECR. The default value is 30 seconds.</param>
         /// <returns></returns>
         public async Task<CommandResponse> PaymentAsync(
             decimal amount,
             CancellationToken cancellationToken = default,
-            Task<bool> issueGoodsTask = null,
-            decimal? maxStatusInfo = null)
+            Func<Task<bool>> issueGoodsCallback = null,
+            decimal? issueGoodsTimeout = null)
         {
             this._logger.LogInformation($"{nameof(PaymentAsync)} - Execute with amount of:{amount}");
 
@@ -538,19 +561,19 @@ namespace Portalum.Zvt
             package.Add(0x04); //Amount prefix
             package.AddRange(NumberHelper.DecimalToBcd(amount));
 
-            if (maxStatusInfo != null)
+            if (issueGoodsTimeout != null)
             {
-                package.Add(0x02); //max status-infos prefix
-                package.AddRange(NumberHelper.DecimalToBcd((decimal)maxStatusInfo));
+                package.Add(0x01); //timeout prefix
+                package.AddRange(NumberHelper.DecimalToBcd((decimal)issueGoodsTimeout / 100, length: 1));
             }
 
             var fullPackage = this.CreatePackage(new byte[] { 0x06, 0x01 }, package);
 
-            if (issueGoodsTask != null)
+            if (issueGoodsCallback != null)
             {
                 return await this.SendCommandAsyncWithCallback(fullPackage,
                     cancellationToken: cancellationToken,
-                    callback: issueGoodsTask
+                    callback: issueGoodsCallback
                 );
             }
             else
