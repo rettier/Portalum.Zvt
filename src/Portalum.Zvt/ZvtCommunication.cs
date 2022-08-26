@@ -91,6 +91,7 @@ namespace Portalum.Zvt
             if (dataProcessed.HasValue && dataProcessed.Value)
             {
                 //Send acknowledge before process the data
+                Console.WriteLine("here");
                 this._deviceCommunication.SendAsync(this._positiveCompletionData1);
             }
         }
@@ -102,7 +103,7 @@ namespace Portalum.Zvt
         /// <param name="acknowledgeReceiveTimeoutMilliseconds">Maximum waiting time for the acknowledge package, default is 5 seconds, T3 Timeout</param>
         /// <param name="cancellationToken"></param>
         /// <returns></returns>
-        public async Task<SendCommandResult> SendCommandAsync(
+        public async Task<SendCommandResult>  SendCommandAsync(
             byte[] commandData,
             int acknowledgeReceiveTimeoutMilliseconds = 5000,
             CancellationToken cancellationToken = default)

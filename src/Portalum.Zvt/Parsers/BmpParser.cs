@@ -507,9 +507,15 @@ namespace Portalum.Zvt.Parsers
         {
             var errorMessage = this._errorMessageRepository.GetMessage(data[0]);
 
-            if (response is IResponseErrorMessage typedResponse)
+            if (response is IResponseErrorMessage typedErrorMessageResponse)
             {
-                typedResponse.ErrorMessage = errorMessage;
+                typedErrorMessageResponse.ErrorMessage = errorMessage;
+                return true;
+            }
+            
+            if (response is IResponseErrorCode typedErrorCodeResponse)
+            {
+                typedErrorCodeResponse.ErrorCode = data[0];
                 return true;
             }
 
