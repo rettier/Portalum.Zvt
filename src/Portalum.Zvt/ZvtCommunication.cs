@@ -28,10 +28,7 @@ namespace Portalum.Zvt
 
         private readonly byte[] _positiveCompletionData1 = new byte[] { 0x80, 0x00, 0x00 }; //Default
         private readonly byte[] _positiveCompletionData2 = new byte[] { 0x84, 0x00, 0x00 }; //Alternative
-
-        private readonly byte[]
-            _positiveCompletionData3 = new byte[] { 0x84, 0x9C, 0x00 }; //Special case for request more time
-
+        private readonly byte[] _positiveCompletionData3 = new byte[] { 0x84, 0x9C, 0x00 }; //Special case for request more time
         private readonly byte[] _otherCommandData = new byte[] { 0x84, 0x83, 0x00 };
         private readonly byte _negativeCompletionPrefix = 0x84;
         private readonly byte[] _negativeIssueGoodsData = new byte[] { 0x84, 0x66, 0x00 };
@@ -129,14 +126,12 @@ namespace Portalum.Zvt
             this._acknowledgeReceivedCancellationTokenSource?.Dispose();
             this._acknowledgeReceivedCancellationTokenSource = new CancellationTokenSource();
 
-            using var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken,
-                this._acknowledgeReceivedCancellationTokenSource.Token);
+            using var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, this._acknowledgeReceivedCancellationTokenSource.Token);
 
             this._waitForAcknowledge = true;
             try
             {
-                await this._deviceCommunication.SendAsync(commandData, linkedCancellationTokenSource.Token)
-                    .ContinueWith(task => { });
+                await this._deviceCommunication.SendAsync(commandData, linkedCancellationTokenSource.Token).ContinueWith(task => { });
             }
             catch (Exception exception)
             {
@@ -145,16 +140,15 @@ namespace Portalum.Zvt
                 return SendCommandResult.SendFailure;
             }
 
-            await Task.Delay(acknowledgeReceiveTimeoutMilliseconds, linkedCancellationTokenSource.Token).ContinueWith(
-                task =>
+            await Task.Delay(acknowledgeReceiveTimeoutMilliseconds, linkedCancellationTokenSource.Token).ContinueWith(task =>
+            {
+                if (task.Status == TaskStatus.RanToCompletion)
                 {
-                    if (task.Status == TaskStatus.RanToCompletion)
-                    {
-                        this._logger.LogError($"{nameof(SendCommandAsync)} - Wait task for acknowledge was aborted");
-                    }
+                    this._logger.LogError($"{nameof(SendCommandAsync)} - Wait task for acknowledge was aborted");
+                }
 
-                    this._waitForAcknowledge = false;
-                });
+                this._waitForAcknowledge = false;
+            });
 
             this._acknowledgeReceivedCancellationTokenSource.Dispose();
 

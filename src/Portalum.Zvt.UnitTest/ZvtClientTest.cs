@@ -3,7 +3,6 @@ using Moq;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Castle.Components.DictionaryAdapter.Xml;
 using Portalum.Zvt.Helpers;
 
 namespace Portalum.Zvt.UnitTest
