@@ -234,6 +234,62 @@ namespace Portalum.Zvt.UnitTest
             Assert.AreEqual(CommandResponseState.Successful, commandResponse.State);
         }
         
+        [TestMethod]
+        public async Task PaymentAsync_IssueOfGoods_DelayedFailure_Successful()
+        {
+            var taskStarted = false;
+            byte[] dataSent = Array.Empty<byte>();
+            var loggerZvtClient = LoggerHelper.GetLogger<ZvtClient>();
+            var mockDeviceCommunication = new Mock<IDeviceCommunication>();
+            mockDeviceCommunication
+                .Setup(c => c.SendAsync(It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+                .Returns(Task(byte[] data, CancellationToken token) =>
+                {
+                    dataSent = data;
+                    return Task.CompletedTask;
+                });
+
+            var clientConfig = new ZvtClientConfig
+            {
+                CommandCompletionTimeout = TimeSpan.FromSeconds(5)
+            };
+
+            var zvtClient = new ZvtClient(mockDeviceCommunication.Object, loggerZvtClient.Object, clientConfig);
+
+            var issueGoodsAfter3Seconds = async Task<bool>() =>
+            {
+                taskStarted = true;
+                await Task.Delay(3000);
+                return false;
+            };
+            
+            var paymentTask =
+                zvtClient.PaymentAsync(33, issueGoodsCallback: issueGoodsAfter3Seconds, issueGoodsTimeout: 5);
+            mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x80, 0x00, 0x00 });
+            CollectionAssert.AreEqual(new byte[] { 0x06, 0x01, 0x09, 0x04, 0x00, 0x00, 0x00, 0x00, 0x33, 0x00, 0x01, 0x05 },
+                dataSent);
+            
+            dataSent = Array.Empty<byte>();
+            mockDeviceCommunication.Raise(mock => mock.DataReceived += null,
+                new byte[] { 0x04, 0x0F, 0x02, 0x27, 0x00 });
+            await Task.Delay(1000);
+
+            // after the status information has been received, the fulfill task is started 
+            Assert.IsTrue(taskStarted);
+
+            // ensure no answer is sent, until the task has finished
+            CollectionAssert.AreEqual(Array.Empty<byte>(), dataSent);
+
+            // after the task has finished, the answer is sent
+            await Task.Delay(3000); // 2 seconds remaining, 1 second for the ECR to answer
+            CollectionAssert.AreEqual(new byte[] { 0x84, 0x66, 0x00 }, dataSent);
+            
+            mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x06, 0x1E, 0x01, 0x05 });
+            var commandResponse = await paymentTask;
+
+            zvtClient.Dispose();
+            Assert.AreEqual(CommandResponseState.Abort, commandResponse.State);
+        }
         
         [TestMethod]
         public async Task PaymentAsync_IssueOfGoods_RejectedCard_Successful()

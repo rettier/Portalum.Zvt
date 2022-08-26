@@ -390,7 +390,7 @@ namespace Portalum.Zvt
                         callbackTask = Task.Run(callback, cancellationToken);
                         callbackTask.ContinueWith(task =>
                         {
-                            this._zvtCommunication.SendCompletion();
+                            this._zvtCommunication.SendAcknowledgement(task.Result);
                             this._zvtCommunication.suppressAcknowledge = false;
                         });
                     }
