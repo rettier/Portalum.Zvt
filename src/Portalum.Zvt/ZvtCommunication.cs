@@ -91,7 +91,6 @@ namespace Portalum.Zvt
             if (dataProcessed.HasValue && dataProcessed.Value)
             {
                 //Send acknowledge before process the data
-                Console.WriteLine("here");
                 this._deviceCommunication.SendAsync(this._positiveCompletionData1);
             }
         }

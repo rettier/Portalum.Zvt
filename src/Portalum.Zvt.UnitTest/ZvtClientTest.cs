@@ -102,5 +102,36 @@ namespace Portalum.Zvt.UnitTest
             Assert.AreEqual(CommandResponseState.Abort, commandResponse.State);
             Assert.AreEqual("card not readable (LRC-/parity-error)", commandResponse.ErrorMessage);
         }
+
+        [TestMethod]
+        public async Task PaymentAsync_Successful()
+        {
+            var loggerZvtClient = LoggerHelper.GetLogger<ZvtClient>();
+            var mockDeviceCommunication = new Mock<IDeviceCommunication>();
+
+            var clientConfig = new ZvtClientConfig
+            {
+                CommandCompletionTimeout = TimeSpan.FromSeconds(5)
+            };
+
+            var zvtClient = new ZvtClient(mockDeviceCommunication.Object, loggerZvtClient.Object, clientConfig);
+
+            var paymentTask = zvtClient.PaymentAsync(10);
+            zvtClient.StatusInformationReceived += (info) =>
+            {
+                Console.WriteLine(info.ErrorCode);
+            };
+            mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x80, 0x00, 0x00 });
+            await Task.Delay(1000);
+            mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x04, 0x0F, 0x02, 0x27, 0x60 });
+            await Task.Delay(1000);
+            mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x06, 0x0F, 0x00 });
+            await Task.Delay(1000);
+            var commandResponse = await paymentTask;
+
+            zvtClient.Dispose();
+
+            Assert.AreEqual(CommandResponseState.Successful, commandResponse.State);
+        }
     }
 }
