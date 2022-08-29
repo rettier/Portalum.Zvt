@@ -205,8 +205,7 @@ namespace Portalum.Zvt.UnitTest
                 return true;
             };
             
-            var paymentTask =
-                zvtClient.PaymentAsync(33, issueGoodsCallback: issueGoodsAfter3Seconds, issueGoodsTimeout: 5);
+            var paymentTask = zvtClient.PaymentAsync(33);
             mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x80, 0x00, 0x00 });
             CollectionAssert.AreEqual(new byte[] { 0x06, 0x01, 0x09, 0x04, 0x00, 0x00, 0x00, 0x00, 0x33, 0x00, 0x01, 0x05 },
                 dataSent);
@@ -263,7 +262,7 @@ namespace Portalum.Zvt.UnitTest
             };
             
             var paymentTask =
-                zvtClient.PaymentAsync(33, issueGoodsCallback: issueGoodsAfter3Seconds, issueGoodsTimeout: 5);
+                zvtClient.PaymentAsync(33);
             mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x80, 0x00, 0x00 });
             CollectionAssert.AreEqual(new byte[] { 0x06, 0x01, 0x09, 0x04, 0x00, 0x00, 0x00, 0x00, 0x33, 0x00, 0x01, 0x05 },
                 dataSent);
@@ -320,7 +319,7 @@ namespace Portalum.Zvt.UnitTest
             };
             
             var paymentTask =
-                zvtClient.PaymentAsync(33, issueGoodsCallback: issueGoodsAfter3Seconds, issueGoodsTimeout: 5);
+                zvtClient.PaymentAsync(33);
             mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x80, 0x00, 0x00 });
             CollectionAssert.AreEqual(new byte[] { 0x06, 0x01, 0x09, 0x04, 0x00, 0x00, 0x00, 0x00, 0x33, 0x00, 0x01, 0x05 },
                 dataSent);

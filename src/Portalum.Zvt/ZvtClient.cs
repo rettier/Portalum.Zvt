@@ -53,7 +53,10 @@ namespace Portalum.Zvt
         /// </summary>
         public event Action<ReceiptInfo> ReceiptReceived;
 
-        //TODO: Add good summary
+        /// <summary>
+        /// When the event is registered it is polled at 2-second intervals to check if the issue of goods is finished.
+        /// For possible return values see CompletionInfoStatus.
+        /// </summary>
         public event Func<CompletionInfo> AskForCompletionInfo;
 
         #endregion

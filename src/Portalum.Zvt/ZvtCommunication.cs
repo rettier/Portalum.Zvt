@@ -1,11 +1,10 @@
-﻿using Microsoft.Extensions.Logging;
-using Portalum.Zvt.Helpers;
-using Portalum.Zvt.Models;
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using Portalum.Zvt.Helpers;
+using Portalum.Zvt.Models;
 
 namespace Portalum.Zvt
 {
@@ -27,14 +26,17 @@ namespace Portalum.Zvt
         /// </summary>
         public event Func<byte[], bool> DataReceived;
 
+        /// <summary>
+        /// A callback which is checked 
+        /// </summary>
         public event Func<CompletionInfo> GetCompletionInfo;
 
         private readonly byte[] _positiveCompletionData1 = new byte[] { 0x80, 0x00, 0x00 }; //Default
         private readonly byte[] _positiveCompletionData2 = new byte[] { 0x84, 0x00, 0x00 }; //Alternative
         private readonly byte[] _positiveCompletionData3 = new byte[] { 0x84, 0x9C, 0x00 }; //Special case for request more time
+        private readonly byte[] _negativeIssueGoodsData = new byte[] { 0x84, 0x66, 0x00 };
         private readonly byte[] _otherCommandData = new byte[] { 0x84, 0x83, 0x00 };
         private readonly byte _negativeCompletionPrefix = 0x84;
-        private readonly byte[] _negativeIssueGoodsData = new byte[] { 0x84, 0x66, 0x00 };
 
         /// <summary>
         /// ZvtCommunication
@@ -122,11 +124,7 @@ namespace Portalum.Zvt
                         this._deviceCommunication.SendAsync(this._positiveCompletionData1);
                         break;
                     case CompletionInfoStatus.Failure:
-                        var controlField1 = new byte[] { 0x84, 0x01 };
-
-                        var package1 = new List<byte>();
-                        package1.Add(0x00);
-                        this._deviceCommunication.SendAsync(PackageHelper.Create(controlField1, package1.ToArray()));
+                        this._deviceCommunication.SendAsync(this._negativeIssueGoodsData);
                         break;
                     default:
                         throw new NotImplementedException();
