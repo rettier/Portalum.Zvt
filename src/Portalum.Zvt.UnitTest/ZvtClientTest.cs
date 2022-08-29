@@ -4,6 +4,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Portalum.Zvt.Helpers;
+using Portalum.Zvt.Models;
 
 namespace Portalum.Zvt.UnitTest
 {
@@ -254,22 +255,32 @@ namespace Portalum.Zvt.UnitTest
 
             var zvtClient = new ZvtClient(mockDeviceCommunication.Object, loggerZvtClient.Object, clientConfig);
 
-            var issueGoodsAfter3Seconds = async Task<bool>() =>
+            var completionInfo = new CompletionInfo();
+
+            async Task FailAfter3Seconds()
             {
                 taskStarted = true;
                 await Task.Delay(3000);
-                return false;
+                completionInfo.State = CompletionInfoState.Failure;
+                zvtClient.SendCompletionInfo(completionInfo);
+            }
+
+            zvtClient.AskForCompletionInfo += () => completionInfo;
+            zvtClient.StatusInformationReceived += (StatusInformation info) =>
+            {
+                if (info.ErrorCode == 0)
+                {
+                    Task.Run(FailAfter3Seconds);
+                };
             };
             
             var paymentTask =
                 zvtClient.PaymentAsync(33);
             mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x80, 0x00, 0x00 });
-            CollectionAssert.AreEqual(new byte[] { 0x06, 0x01, 0x09, 0x04, 0x00, 0x00, 0x00, 0x00, 0x33, 0x00, 0x01, 0x05 },
-                dataSent);
+            CollectionAssert.AreEqual(new byte[] { 0x06, 0x01, 0x07, 0x04, 0x00, 0x00, 0x00, 0x00, 0x33, 0x00 }, dataSent);
             
             dataSent = Array.Empty<byte>();
-            mockDeviceCommunication.Raise(mock => mock.DataReceived += null,
-                new byte[] { 0x04, 0x0F, 0x02, 0x27, 0x00 });
+            mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x04, 0x0F, 0x02, 0x27, 0x00 });
             await Task.Delay(1000);
 
             // after the status information has been received, the fulfill task is started 

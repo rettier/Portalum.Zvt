@@ -219,23 +219,26 @@ namespace Portalum.Zvt
             this.ReceiptReceived?.Invoke(receiptInfo);
         }
 
-        private bool DataReceived(byte[] data)
+        private ProcessData DataReceived(byte[] data)
         {
-            var processDataState = this._receiveHandler.ProcessData(data);
-            switch (processDataState)
+            var processData = this._receiveHandler.ProcessData(data);
+            switch (processData.State)
             {
                 case ProcessDataState.CannotProcess:
                 case ProcessDataState.ParseFailure:
                     this._logger.LogError($"{nameof(DataReceived)} - Unprocessable data received {BitConverter.ToString(data)}");
-                    return false;
+                    break;
+                
                 case ProcessDataState.WaitForMoreData:
-                    return false;
                 case ProcessDataState.Processed:
-                    return true;
+                    break;
+                
+                default:
+                    this._logger.LogCritical($"{nameof(DataReceived)} - Invalid state {processData.State}");
+                    break;
             }
 
-            this._logger.LogCritical($"{nameof(DataReceived)} - Invalid state {processDataState}");
-            return false;
+            return processData;
         }
 
         /// <summary>
@@ -252,7 +255,7 @@ namespace Portalum.Zvt
         {
             using var timeoutCancellationTokenSource = new CancellationTokenSource(this._commandCompletionTimeout);
             using var dataReceivcedCancellationTokenSource = new CancellationTokenSource();
-            using var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, dataReceivcedCancellationTokenSource.Token);
+            using var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, dataReceivcedCancellationTokenSource.Token, timeoutCancellationTokenSource.Token);
 
             var commandResponse = new CommandResponse
             {
@@ -602,6 +605,11 @@ namespace Portalum.Zvt
 
             var fullPackage = PackageHelper.Create(controlFieldData, packageData);
             return await this.SendCommandAsync(fullPackage, cancellationToken: cancellationToken);
+        }
+
+        public void SendCompletionInfo(CompletionInfo completionInfo)
+        {
+            this._zvtCommunication.SendCompletionInfo(completionInfo);
         }
     }
 }
