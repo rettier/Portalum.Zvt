@@ -19,13 +19,8 @@ namespace Portalum.Zvt
         private readonly IDeviceCommunication _deviceCommunication;
 
         private CancellationTokenSource _acknowledgeReceivedCancellationTokenSource;
-        private CancellationTokenSource _sendCommandAsyncCancellationTokenSource;
         private byte[] _dataBuffer;
         private bool _waitForAcknowledge = false;
-
-        private readonly object _completionLock = new object();
-        private bool _completionPending = false;
-        private bool _asyncCompletion = false;
 
         /// <summary>
         /// New data received from the pt device
@@ -98,79 +93,49 @@ namespace Portalum.Zvt
             this._acknowledgeReceivedCancellationTokenSource?.Cancel();
         }
 
-        /// <summary>
-        /// Sends completion information to the PT in case the PT is currently waiting for completion of the ECR.
-        /// This can be called to more quickly complete a pending transaction, instead of waiting for the PT
-        /// to poll the information.
-        /// </summary>
-        /// <param name="completionInfo">The completion info to be sent.</param>
-        public void SendCompletionInfo(CompletionInfo completionInfo)
-        {
-            _logger.LogDebug("SendCompletionInfo, completionInfo: " + completionInfo);
-            lock (_completionLock)
-            {
-                if (!_completionPending)
-                {
-                    this._logger.LogWarning("No completion was pending. Completion info will be ignored.");
-                    return;
-                }
-                
-                _completionPending = false;
-                switch (completionInfo.State)
-                {
-                    case CompletionInfoState.ChangeAmount:
-                        var controlField = new byte[] { 0x84, 0x9D };
-
-                        // Change the amount from the original in the start request
-                        var package = new List<byte>();
-                        package.Add(0x04); //Amount prefix
-                        package.AddRange(NumberHelper.DecimalToBcd(completionInfo.Amount));
-                        this._deviceCommunication.SendAsync(PackageHelper.Create(controlField, package.ToArray()));
-                        break;
-                    case CompletionInfoState.Successful:
-                        this._deviceCommunication.SendAsync(this._positiveCompletionData1);
-                        break;
-                    case CompletionInfoState.Failure:
-                        this._deviceCommunication.SendAsync(this._negativeIssueGoodsData);
-                        break;
-                    default:
-                        throw new NotImplementedException();
-                    case CompletionInfoState.Wait:
-                        throw new InvalidOperationException(
-                            "Cannot explicitly send a wait status. This is handled automatically.");
-                }
-            }
-        }
-
         private void ProcessData(byte[] data)
         {
             var dataProcessed = this.DataReceived?.Invoke(data);
             if (dataProcessed?.State == ProcessDataState.Processed)
             {
-                var completionInfo = this.GetCompletionInfo?.Invoke();
-                if (completionInfo == null)
+                if (dataProcessed.Response is StatusInformation { ErrorCode: 0 })
                 {
-                    _asyncCompletion = false;
-                    //Default if no one has subscribed to the event, immediately approve the transaction
-                    this._deviceCommunication.SendAsync(this._positiveCompletionData1);
-                } 
-                else
-                {
-                    if (completionInfo.State == CompletionInfoState.Wait)
+                    var completionInfo = this.GetCompletionInfo?.Invoke();
+                    if (completionInfo == null)
                     {
-                        this._completionPending = true;
-                        Task.Delay(10000, this._sendCommandAsyncCancellationTokenSource.Token).ContinueWith(task =>
-                        {
-                            if (this._completionPending && task.Status == TaskStatus.RanToCompletion)
-                            {
-                                this._deviceCommunication.SendAsync(this._positiveCompletionData3);
-                            }
-                        });
-                    }
+                        //Default if no one has subscribed to the event, immediately approve the transaction
+                        this._deviceCommunication.SendAsync(this._positiveCompletionData1);
+                    } 
                     else
                     {
-                        this.SendCompletionInfo(completionInfo);
+                        switch (completionInfo.State)
+                        {
+                            case CompletionInfoState.Wait:
+                                this._deviceCommunication.SendAsync(this._positiveCompletionData3);
+                                break;
+                            case CompletionInfoState.ChangeAmount:
+                                var controlField = new byte[] { 0x84, 0x9D };
+
+                                // Change the amount from the original in the start request
+                                var package = new List<byte>();
+                                package.Add(0x04); //Amount prefix
+                                package.AddRange(NumberHelper.DecimalToBcd(completionInfo.Amount));
+                                this._deviceCommunication.SendAsync(PackageHelper.Create(controlField, package.ToArray()));
+                                break;
+                            case CompletionInfoState.Successful:
+                                this._deviceCommunication.SendAsync(this._positiveCompletionData1);
+                                break;
+                            case CompletionInfoState.Failure:
+                                this._deviceCommunication.SendAsync(this._negativeIssueGoodsData);
+                                break;
+                            default:
+                                throw new NotImplementedException();
+                        }
                     }
+                }
+                else
+                {
+                    this._deviceCommunication.SendAsync(this._positiveCompletionData1);
                 }
             }
         }
@@ -192,67 +157,59 @@ namespace Portalum.Zvt
             this._acknowledgeReceivedCancellationTokenSource?.Dispose();
             this._acknowledgeReceivedCancellationTokenSource = new CancellationTokenSource();
 
-            this._sendCommandAsyncCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, this._acknowledgeReceivedCancellationTokenSource.Token);
+            using var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, this._acknowledgeReceivedCancellationTokenSource.Token);
+            
+            this._waitForAcknowledge = true;
             try
             {
-
-                this._waitForAcknowledge = true;
-                try
-                {
-                    await this._deviceCommunication.SendAsync(commandData, _sendCommandAsyncCancellationTokenSource.Token)
-                        .ContinueWith(task => { });
-                }
-                catch (Exception exception)
-                {
-                    this._logger.LogError(exception, $"{nameof(SendCommandAsync)} - Cannot send data");
-                    this._acknowledgeReceivedCancellationTokenSource.Dispose();
-                    return SendCommandResult.SendFailure;
-                }
-
-                await Task.Delay(acknowledgeReceiveTimeoutMilliseconds, _sendCommandAsyncCancellationTokenSource.Token)
-                    .ContinueWith(task =>
-                    {
-                        if (task.Status == TaskStatus.RanToCompletion)
-                        {
-                            this._logger.LogError(
-                                $"{nameof(SendCommandAsync)} - Wait task for acknowledge was aborted");
-                        }
-
-                        this._waitForAcknowledge = false;
-                    });
-
-                this._acknowledgeReceivedCancellationTokenSource.Dispose();
-
-                if (this._dataBuffer == null)
-                {
-                    return SendCommandResult.NoDataReceived;
-                }
-
-                if (this.CheckIsPositiveCompletion())
-                {
-                    this.ForwardUnusedBufferData();
-
-                    return SendCommandResult.PositiveCompletionReceived;
-                }
-
-                if (this.CheckIsNotSupported())
-                {
-                    return SendCommandResult.NotSupported;
-                }
-
-                if (this.CheckIsNegativeCompletion())
-                {
-                    this._logger.LogError($"{nameof(SendCommandAsync)} - 'Negative completion' received");
-                    return SendCommandResult.NegativeCompletionReceived;
-                }
-
-                return SendCommandResult.UnknownFailure;
+                await this._deviceCommunication.SendAsync(commandData, linkedCancellationTokenSource.Token)
+                    .ContinueWith(task => { });
             }
-            finally
+            catch (Exception exception)
             {
-                this._sendCommandAsyncCancellationTokenSource?.Cancel();
+                this._logger.LogError(exception, $"{nameof(SendCommandAsync)} - Cannot send data");
+                this._acknowledgeReceivedCancellationTokenSource.Dispose();
+                return SendCommandResult.SendFailure;
             }
-            
+
+            await Task.Delay(acknowledgeReceiveTimeoutMilliseconds, linkedCancellationTokenSource.Token)
+                .ContinueWith(task =>
+                {
+                    if (task.Status == TaskStatus.RanToCompletion)
+                    {
+                        this._logger.LogError(
+                            $"{nameof(SendCommandAsync)} - Wait task for acknowledge was aborted");
+                    }
+
+                    this._waitForAcknowledge = false;
+                });
+
+            this._acknowledgeReceivedCancellationTokenSource.Dispose();
+
+            if (this._dataBuffer == null)
+            {
+                return SendCommandResult.NoDataReceived;
+            }
+
+            if (this.CheckIsPositiveCompletion())
+            {
+                this.ForwardUnusedBufferData();
+
+                return SendCommandResult.PositiveCompletionReceived;
+            }
+
+            if (this.CheckIsNotSupported())
+            {
+                return SendCommandResult.NotSupported;
+            }
+
+            if (this.CheckIsNegativeCompletion())
+            {
+                this._logger.LogError($"{nameof(SendCommandAsync)} - 'Negative completion' received");
+                return SendCommandResult.NegativeCompletionReceived;
+            }
+
+            return SendCommandResult.UnknownFailure;
         }
 
         private bool CheckIsPositiveCompletion()

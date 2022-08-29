@@ -12,5 +12,12 @@
         /// initially authorized amount can be used.
         /// </summary>
         public decimal Amount { get; set; }
+
+        public CompletionInfo() : this(CompletionInfoState.Wait) { }
+
+        public CompletionInfo(CompletionInfoState state)
+        {
+            this.State = state;
+        }
     }
 }

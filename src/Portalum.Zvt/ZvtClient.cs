@@ -254,8 +254,8 @@ namespace Portalum.Zvt
             CancellationToken cancellationToken = default)
         {
             using var timeoutCancellationTokenSource = new CancellationTokenSource(this._commandCompletionTimeout);
-            using var dataReceivcedCancellationTokenSource = new CancellationTokenSource();
-            using var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, dataReceivcedCancellationTokenSource.Token, timeoutCancellationTokenSource.Token);
+            using var dataReceivedCancellationTokenSource = new CancellationTokenSource();
+            using var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, dataReceivedCancellationTokenSource.Token, timeoutCancellationTokenSource.Token);
 
             var commandResponse = new CommandResponse
             {
@@ -266,7 +266,7 @@ namespace Portalum.Zvt
             {
                 commandResponse.State = CommandResponseState.Successful;
 
-                dataReceivcedCancellationTokenSource.Cancel();
+                dataReceivedCancellationTokenSource.Cancel();
             }
 
             void abortReceived(string errorMessage)
@@ -274,7 +274,7 @@ namespace Portalum.Zvt
                 commandResponse.State = CommandResponseState.Abort;
                 commandResponse.ErrorMessage = errorMessage;
 
-                dataReceivcedCancellationTokenSource.Cancel();
+                dataReceivedCancellationTokenSource.Cancel();
             }
 
             void intermediateStatusInformationReceived(string status)
@@ -605,11 +605,6 @@ namespace Portalum.Zvt
 
             var fullPackage = PackageHelper.Create(controlFieldData, packageData);
             return await this.SendCommandAsync(fullPackage, cancellationToken: cancellationToken);
-        }
-
-        public void SendCompletionInfo(CompletionInfo completionInfo)
-        {
-            this._zvtCommunication.SendCompletionInfo(completionInfo);
         }
     }
 }
