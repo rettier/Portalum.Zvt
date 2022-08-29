@@ -404,9 +404,7 @@ namespace Portalum.Zvt.Parsers
                     currentPosition += dataLength;
                     dataLength = bmpInfo.CalculateDataLength.Invoke(dataLengthData);
                 }
-
-                byte[] bmpData;
-                if (dataLength == 0)
+                else if (dataLength == 0)
                 {
                     //Detect TLV Length
                     var tlvLengthInfo = this._tlvParser.GetLength(data.Slice(currentPosition));
@@ -418,7 +416,7 @@ namespace Portalum.Zvt.Parsers
                     return false;
                 }
 
-                bmpData = data.Slice(currentPosition, dataLength).ToArray();
+                var bmpData = data.Slice(currentPosition, dataLength).ToArray();
 
                 if (bmpInfo.TryParse != null)
                 {
@@ -508,14 +506,21 @@ namespace Portalum.Zvt.Parsers
         private bool ParseErrorCode(byte[] data, IResponse response)
         {
             var errorMessage = this._errorMessageRepository.GetMessage(data[0]);
-
-            if (response is IResponseErrorMessage typedResponse)
+            bool parsed = false;
+            
+            if (response is IResponseErrorMessage typedErrorMessageResponse)
             {
-                typedResponse.ErrorMessage = errorMessage;
-                return true;
+                typedErrorMessageResponse.ErrorMessage = errorMessage;
+                parsed = true;
+            }
+            
+            if (response is IResponseErrorCode typedErrorCodeResponse)
+            {
+                typedErrorCodeResponse.ErrorCode = data[0];
+                parsed = true;
             }
 
-            return false;
+            return parsed;
         }
 
         private bool ParseTime(byte[] data, IResponse response)

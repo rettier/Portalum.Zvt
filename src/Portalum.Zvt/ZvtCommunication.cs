@@ -34,6 +34,7 @@ namespace Portalum.Zvt
         private readonly byte[] _positiveCompletionData3 = new byte[] { 0x84, 0x9C, 0x00 }; //Special case for request more time
         private readonly byte[] _otherCommandData = new byte[] { 0x84, 0x83, 0x00 };
         private readonly byte _negativeCompletionPrefix = 0x84;
+        private readonly byte[] _negativeIssueGoodsData = new byte[] { 0x84, 0x66, 0x00 };
 
         /// <summary>
         /// ZvtCommunication

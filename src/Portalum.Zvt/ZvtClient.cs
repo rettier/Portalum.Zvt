@@ -247,6 +247,7 @@ namespace Portalum.Zvt
             bool endAfterAcknowledge = false,
             CancellationToken cancellationToken = default)
         {
+            using var timeoutCancellationTokenSource = new CancellationTokenSource(this._commandCompletionTimeout);
             using var dataReceivcedCancellationTokenSource = new CancellationTokenSource();
             using var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, dataReceivcedCancellationTokenSource.Token);
 
@@ -270,10 +271,22 @@ namespace Portalum.Zvt
                 dataReceivcedCancellationTokenSource.Cancel();
             }
 
+            void intermediateStatusInformationReceived(string status)
+            {
+                timeoutCancellationTokenSource.CancelAfter(this._commandCompletionTimeout);
+            }
+
+            void statusInformationReceived(StatusInformation statusInformation)
+            {
+                timeoutCancellationTokenSource.CancelAfter(this._commandCompletionTimeout);
+            }
+
             try
             {
                 this._receiveHandler.CompletionReceived += completionReceived;
                 this._receiveHandler.AbortReceived += abortReceived;
+                this._receiveHandler.IntermediateStatusInformationReceived += intermediateStatusInformationReceived;
+                this._receiveHandler.StatusInformationReceived += statusInformationReceived;
 
                 this._logger.LogDebug($"{nameof(SendCommandAsync)} - Send command to PT");
 
@@ -286,7 +299,7 @@ namespace Portalum.Zvt
                 }
                 if (sendCommandResult != SendCommandResult.PositiveCompletionReceived)
                 {
-                    this._logger.LogError($"{nameof(SendCommandAsync)} - Failure on send command");
+                    this._logger.LogError($"{nameof(SendCommandAsync)} - Failure on send command: {sendCommandResult}");
                     commandResponse.State = CommandResponseState.Error;
                     commandResponse.ErrorMessage = sendCommandResult.ToString();
 
@@ -299,9 +312,10 @@ namespace Portalum.Zvt
                     return commandResponse;
                 }
 
-                await Task.Delay(this._commandCompletionTimeout, linkedCancellationTokenSource.Token).ContinueWith(task =>
+                // There is no infinite timeout here, the timeout comes via the `timeoutCancellationTokenSource`
+                await Task.Delay(Timeout.InfiniteTimeSpan, linkedCancellationTokenSource.Token).ContinueWith(task =>
                 {
-                    if (task.Status == TaskStatus.RanToCompletion)
+                    if (timeoutCancellationTokenSource.IsCancellationRequested)
                     {
                         commandResponse.State = CommandResponseState.Timeout;
                         this._logger.LogError($"{nameof(SendCommandAsync)} - No result received in the specified timeout {this._commandCompletionTimeout.TotalMilliseconds}ms");
@@ -312,6 +326,8 @@ namespace Portalum.Zvt
             {
                 this._receiveHandler.AbortReceived -= abortReceived;
                 this._receiveHandler.CompletionReceived -= completionReceived;
+                this._receiveHandler.IntermediateStatusInformationReceived -= intermediateStatusInformationReceived;
+                this._receiveHandler.StatusInformationReceived -= statusInformationReceived;
             }
 
             return commandResponse;

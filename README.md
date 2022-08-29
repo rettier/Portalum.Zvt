@@ -12,7 +12,7 @@ The aim of this project is to achieve uncomplicated acceptance by payment servic
 
 ## How can I use it?
 
-The package is available via [nuget](https://www.nuget.org/packages/Portalum.Zvt)
+The package is available via [NuGet](https://www.nuget.org/packages/Portalum.Zvt)
 ```
 PM> install-package Portalum.Zvt
 ```
@@ -125,7 +125,7 @@ if (!await deviceCommunication.ConnectAsync())
 var zvtClient = new ZvtClient(deviceCommunication, logger: zvtClientLogger);
 ```
 
-### Set a custom network terminal device port
+### Set a custom tcp port
 
 ```
 var deviceCommunication = new TcpNetworkDeviceCommunication("192.168.0.10", port: 20007);
@@ -183,5 +183,6 @@ Common `BaudRates` is *9600* or *115200*, default `Parity` is *None*, default `D
 
 The official documentation of the ZVT protocol is available here
 
+- https://www.terminalhersteller.de
 - https://www.terminalhersteller.de/downloads/PA00P015_13.09_final_en.pdf
 - https://www.terminalhersteller.de/downloads/PA00P016_04_en.pdf
