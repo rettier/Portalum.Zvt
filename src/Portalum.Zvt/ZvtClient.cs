@@ -5,6 +5,7 @@ using Portalum.Zvt.Models;
 using Portalum.Zvt.Repositories;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -30,6 +31,7 @@ namespace Portalum.Zvt
         private readonly ZvtCommunication _zvtCommunication;
         private IReceiveHandler _receiveHandler;
         private readonly TimeSpan _commandCompletionTimeout;
+        private readonly ZvtClientConfig _clientConfig;
 
         #region Events
 
@@ -54,10 +56,18 @@ namespace Portalum.Zvt
         public event Action<ReceiptInfo> ReceiptReceived;
 
         /// <summary>
-        /// When the event is registered it is polled at 2-second intervals to check if the issue of goods is finished.
+        /// When the event is registered it is queries periodically to check if the issue of goods is finished.
+        /// Upon successful completion the payment is stored, otherwise an auto reversal is triggered.
         /// For possible return values see CompletionInfoStatus.
         /// </summary>
-        public event Func<CompletionInfo> AskForCompletionInfo;
+        public event Func<CompletionInfo> GetAsyncCompletionInfo;
+
+        /// <summary>
+        /// Raised when the payment was successful, but before it is stored in the PT. After this event the GetAsyncCompletionInfo
+        /// callback is queries periodically to obtain the completion status. If GetAsyncCompleteInfo is not registered the payment
+        /// is stored immediately in the PT and this event is never raised.
+        /// </summary>
+        public event Action<StatusInformation> StartAsyncCompletion;
 
         #endregion
 
@@ -88,6 +98,7 @@ namespace Portalum.Zvt
             this._commandCompletionTimeout = clientConfig.CommandCompletionTimeout;
 
             this._passwordData = NumberHelper.IntToBcd(clientConfig.Password);
+            this._clientConfig = clientConfig;
 
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
@@ -135,7 +146,7 @@ namespace Portalum.Zvt
 
         private CompletionInfo GetCompletionInfo()
         {
-            return this.AskForCompletionInfo?.Invoke();
+            return this.GetAsyncCompletionInfo?.Invoke();
         }
 
         private Encoding GetEncoding(ZvtEncoding zvtEncoding)
@@ -195,7 +206,7 @@ namespace Portalum.Zvt
             {
                 return new GermanIntermediateStatusRepository();
             }
-            
+
             return new EnglishIntermediateStatusRepository();
         }
 
@@ -228,11 +239,11 @@ namespace Portalum.Zvt
                 case ProcessDataState.ParseFailure:
                     this._logger.LogError($"{nameof(DataReceived)} - Unprocessable data received {BitConverter.ToString(data)}");
                     break;
-                
+
                 case ProcessDataState.WaitForMoreData:
                 case ProcessDataState.Processed:
                     break;
-                
+
                 default:
                     this._logger.LogCritical($"{nameof(DataReceived)} - Invalid state {processData.State}");
                     break;
@@ -256,6 +267,9 @@ namespace Portalum.Zvt
             using var timeoutCancellationTokenSource = new CancellationTokenSource(this._commandCompletionTimeout);
             using var dataReceivedCancellationTokenSource = new CancellationTokenSource();
             using var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, dataReceivedCancellationTokenSource.Token, timeoutCancellationTokenSource.Token);
+
+            var isAsyncCompletion = this.GetAsyncCompletionInfo != null;
+            var startAsyncCompletionFired = false;
 
             var commandResponse = new CommandResponse
             {
@@ -285,6 +299,12 @@ namespace Portalum.Zvt
             void statusInformationReceived(StatusInformation statusInformation)
             {
                 timeoutCancellationTokenSource.CancelAfter(this._commandCompletionTimeout);
+
+                if (statusInformation.ErrorCode == 0 && isAsyncCompletion && !startAsyncCompletionFired)
+                {
+                    startAsyncCompletionFired = true;
+                    this.StartAsyncCompletion?.Invoke(statusInformation);
+                }
             }
 
             try
@@ -423,6 +443,12 @@ namespace Portalum.Zvt
             var package = new List<byte>();
             package.Add(0x04); //Amount prefix
             package.AddRange(NumberHelper.DecimalToBcd(amount));
+
+            if (this.GetAsyncCompletionInfo != null)
+            {
+                package.Add(0x02); // max nr. of status-informations
+                package.Add(this._clientConfig.GetAsyncCompletionInfoLimit);
+            }
 
             var fullPackage = PackageHelper.Create(new byte[] { 0x06, 0x01 }, package);
             return await this.SendCommandAsync(fullPackage, cancellationToken: cancellationToken);

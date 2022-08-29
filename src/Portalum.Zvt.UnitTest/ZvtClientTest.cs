@@ -1,4 +1,5 @@
-﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+﻿using Castle.Components.DictionaryAdapter.Xml;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using System;
 using System.Threading;
@@ -120,13 +121,14 @@ namespace Portalum.Zvt.UnitTest
                     return Task.CompletedTask;
                 });
 
+            var startAsyncCompletionCalled = false;
             var clientConfig = new ZvtClientConfig
             {
                 CommandCompletionTimeout = TimeSpan.FromSeconds(5)
             };
 
             var zvtClient = new ZvtClient(mockDeviceCommunication.Object, loggerZvtClient.Object, clientConfig);
-
+            zvtClient.StartAsyncCompletion += (_) => startAsyncCompletionCalled = true;
             var paymentTask = zvtClient.PaymentAsync(10);
             mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x80, 0x00, 0x00 });
             // ensure the timeout is not set, when nothing is passed to PaymentAsync
@@ -143,6 +145,7 @@ namespace Portalum.Zvt.UnitTest
             mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x06, 0x0F, 0x00 });
             await Task.Delay(1000);
             var commandResponse = await paymentTask;
+            Assert.IsFalse(startAsyncCompletionCalled);
 
             zvtClient.Dispose();
             Assert.AreEqual(CommandResponseState.Successful, commandResponse.State);
@@ -190,6 +193,7 @@ namespace Portalum.Zvt.UnitTest
                     return Task.CompletedTask;
                 });
 
+            var startAsyncCompletionLaunchCount = 0;
             var clientConfig = new ZvtClientConfig
             {
                 CommandCompletionTimeout = TimeSpan.FromSeconds(5)
@@ -198,11 +202,12 @@ namespace Portalum.Zvt.UnitTest
             var zvtClient = new ZvtClient(mockDeviceCommunication.Object, loggerZvtClient.Object, clientConfig);
             var completionInfo = new CompletionInfo();
 
-            zvtClient.AskForCompletionInfo += () => completionInfo;
+            zvtClient.StartAsyncCompletion += (_) => startAsyncCompletionLaunchCount++;
+            zvtClient.GetAsyncCompletionInfo += () => completionInfo;
 
             var paymentTask = zvtClient.PaymentAsync(33);
             mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x80, 0x00, 0x00 });
-            CollectionAssert.AreEqual(new byte[] { 0x06, 0x01, 0x07, 0x04, 0x00, 0x00, 0x00, 0x00, 0x33, 0x00 }, dataSent);
+            CollectionAssert.AreEqual(new byte[] { 0x06, 0x01, 0x09, 0x04, 0x00, 0x00, 0x00, 0x00, 0x33, 0x00, 0x02, 0x99 }, dataSent);
 
             dataSent = Array.Empty<byte>();
             mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x04, 0x0F, 0x02, 0x27, 0x00 });
@@ -211,13 +216,18 @@ namespace Portalum.Zvt.UnitTest
             // the ECR immediately requests for a timeout-extension
             CollectionAssert.AreEqual(new byte[] { 0x84, 0x9C, 0x00 }, dataSent);
 
-            // if the completion info indicates a success with a changed amount, the ECR is informed
+            // if the completion info indicates a success with a changed amount ...
             completionInfo.State = CompletionInfoState.ChangeAmount;
             completionInfo.Amount = 22m;
             mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x04, 0x0F, 0x02, 0x27, 0x00 });
             await Task.Delay(1000);
+            
+            // ... the PT is informed about the changed amount
             CollectionAssert.AreEqual(new byte[] { 0x84, 0x9D, 0x07, 0x04, 0x00, 0x00, 0x00, 0x00, 0x22, 0x00 }, dataSent);
 
+            // the start completion event MUST only be triggered once, even tough we have received two status information events
+            Assert.AreEqual(1, startAsyncCompletionLaunchCount);
+            
             // the pt will send a positive completion
             mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x06, 0x0F, 0x00 });
             var commandResponse = await paymentTask;
@@ -248,11 +258,11 @@ namespace Portalum.Zvt.UnitTest
             var zvtClient = new ZvtClient(mockDeviceCommunication.Object, loggerZvtClient.Object, clientConfig);
             var completionInfo = new CompletionInfo();
 
-            zvtClient.AskForCompletionInfo += () => completionInfo;
+            zvtClient.GetAsyncCompletionInfo += () => completionInfo;
 
             var paymentTask = zvtClient.PaymentAsync(33);
             mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x80, 0x00, 0x00 });
-            CollectionAssert.AreEqual(new byte[] { 0x06, 0x01, 0x07, 0x04, 0x00, 0x00, 0x00, 0x00, 0x33, 0x00 }, dataSent);
+            CollectionAssert.AreEqual(new byte[] { 0x06, 0x01, 0x09, 0x04, 0x00, 0x00, 0x00, 0x00, 0x33, 0x00, 0x02, 0x99 }, dataSent);
 
             dataSent = Array.Empty<byte>();
             mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x04, 0x0F, 0x02, 0x27, 0x00 });
@@ -289,6 +299,7 @@ namespace Portalum.Zvt.UnitTest
                     return Task.CompletedTask;
                 });
 
+            var startAsyncCompletionCalled = false;
             var clientConfig = new ZvtClientConfig
             {
                 CommandCompletionTimeout = TimeSpan.FromSeconds(5)
@@ -298,7 +309,8 @@ namespace Portalum.Zvt.UnitTest
             var completionInfo = new CompletionInfo();
             var askForCompletionCalled = false;
             
-            zvtClient.AskForCompletionInfo += () =>
+            zvtClient.StartAsyncCompletion += (_) => startAsyncCompletionCalled = true;
+            zvtClient.GetAsyncCompletionInfo += () =>
             {
                 askForCompletionCalled = true;
                 return completionInfo;
@@ -306,7 +318,7 @@ namespace Portalum.Zvt.UnitTest
 
             var paymentTask = zvtClient.PaymentAsync(33);
             mockDeviceCommunication.Raise(mock => mock.DataReceived += null, new byte[] { 0x80, 0x00, 0x00 });
-            CollectionAssert.AreEqual(new byte[] { 0x06, 0x01, 0x07, 0x04, 0x00, 0x00, 0x00, 0x00, 0x33, 0x00 }, dataSent);
+            CollectionAssert.AreEqual(new byte[] { 0x06, 0x01, 0x09, 0x04, 0x00, 0x00, 0x00, 0x00, 0x33, 0x00, 0x02, 0x99 }, dataSent);
 
             dataSent = Array.Empty<byte>();
             var negativeAuthorization = "04-0F-25-27-05-29-29-00-02-74-3C-F0-F0-F9-41-62-67-65-6C-65-68-6E-74-8A-06-06-0D-24-0B-07-09-41-62-67-65-6C-65-68-6E-74";
@@ -315,8 +327,9 @@ namespace Portalum.Zvt.UnitTest
             mockDeviceCommunication.Raise(mock => mock.DataReceived += null, cardRejectedStatusInformation);
             await Task.Delay(1000);
 
-            // a not successful status must not trigger the ask for completion info to be called
+            // a not successful status must neither trigger the askForCompletion nor the startCompletion events
             Assert.IsFalse(askForCompletionCalled);
+            Assert.IsFalse(startAsyncCompletionCalled);
 
             // ensure we answer with an ack in this case
             CollectionAssert.AreEqual(new byte[] { 0x80, 0x00, 0x00 }, dataSent);
