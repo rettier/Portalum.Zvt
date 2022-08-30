@@ -105,7 +105,7 @@ namespace Portalum.Zvt
                     {
                         //Default if no one has subscribed to the event, immediately approve the transaction
                         this._deviceCommunication.SendAsync(this._positiveCompletionData1);
-                    } 
+                    }
                     else
                     {
                         switch (completionInfo.State)
@@ -158,12 +158,11 @@ namespace Portalum.Zvt
             this._acknowledgeReceivedCancellationTokenSource = new CancellationTokenSource();
 
             using var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, this._acknowledgeReceivedCancellationTokenSource.Token);
-            
+
             this._waitForAcknowledge = true;
             try
             {
-                await this._deviceCommunication.SendAsync(commandData, linkedCancellationTokenSource.Token)
-                    .ContinueWith(task => { });
+                await this._deviceCommunication.SendAsync(commandData, linkedCancellationTokenSource.Token).ContinueWith(task => { });
             }
             catch (Exception exception)
             {
@@ -172,17 +171,15 @@ namespace Portalum.Zvt
                 return SendCommandResult.SendFailure;
             }
 
-            await Task.Delay(acknowledgeReceiveTimeoutMilliseconds, linkedCancellationTokenSource.Token)
-                .ContinueWith(task =>
+            await Task.Delay(acknowledgeReceiveTimeoutMilliseconds, linkedCancellationTokenSource.Token).ContinueWith(task =>
+            {
+                if (task.Status == TaskStatus.RanToCompletion)
                 {
-                    if (task.Status == TaskStatus.RanToCompletion)
-                    {
-                        this._logger.LogError(
-                            $"{nameof(SendCommandAsync)} - Wait task for acknowledge was aborted");
-                    }
+                    this._logger.LogError($"{nameof(SendCommandAsync)} - Wait task for acknowledge was aborted");
+                }
 
-                    this._waitForAcknowledge = false;
-                });
+                this._waitForAcknowledge = false;
+            });
 
             this._acknowledgeReceivedCancellationTokenSource.Dispose();
 
